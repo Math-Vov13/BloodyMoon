@@ -1,1 +1,0 @@
-# Bloody Moon - Frontend
