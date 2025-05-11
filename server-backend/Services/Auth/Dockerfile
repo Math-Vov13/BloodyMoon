@@ -1,18 +1,17 @@
-FROM golang:alpine
+FROM golang:tip-alpine3.21
 
 ENV GIN_MODE=release
 ENV PORT=8080
+ENV Environment=production
 
-WORKDIR /app
+WORKDIR /build
 
-COPY . /app/
+COPY go.mod go.sum ./
+RUN go mod download
 
-# Run the two commands below to install git and dependencies for the project. 
-RUN apk update && apk add --no-cache git
-RUN go get .
-
-RUN go build .
+COPY . .
+RUN go build -o ./bloodymoon-app ./cmd
 
 EXPOSE 8080
 
-ENTRYPOINT ["./BloodyMoon"]
+ENTRYPOINT [ "./bloodymoon-app" ]
