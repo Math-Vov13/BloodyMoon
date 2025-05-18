@@ -5,7 +5,7 @@ Architecture MicroServices,
 Api Gateway
 
 Services:
-1. Auth [Service](./Services/Auth/README.md)
+1. Profile [Service](./Services/Profile/README.md)
 2. Matchmaker [Service](./Services/Matchmaker/README.md)
 3. Game Logic [Service](./Services/Gamelogic/README.md)
 
