@@ -1,0 +1,28 @@
+Matchmaking:
+
+HTTP
+parties:
+1. nombres de parties de jeu en cours
+2. Trouver une partie privée avec un code
+3. Rentrer dans la file d'attente
+4. Créer une partie privée
+
+créer une partie privée:
+1. Nom de la partie
+2. Nombres de joueurs max
+3. Choisir le mode de jeu (un seul disponible)
+4. Choisir le décors
+5. Créer la partie
+
+
+WEBSOCKET
+infos de la file d'attente (rejoint):
+1. nombre de joueurs dans la file
+2. temps d'attente approximatif
+3. statut de la recherche de partie
+
+infos de la partie (rejoint):
+1. statut
+2. ping
+3. mode de jeu
+4. joueurs connectés

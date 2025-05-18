@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat WebSocket avec Gin</title>
+    <style>
+        #messages { border: 1px solid #ccc; height: 300px; overflow-y: scroll; padding: 10px; }
+    </style>
+</head>
+<body>
+    <h1>Chat Room</h1>
+    <div id="messages"></div>
+    <input id="input" placeholder="Votre message" autocomplete="off" />
+
+    <script>
+        let socket;
+
+        function connect() {
+            socket = new WebSocket("ws://" + location.host + "/ws/room");
+
+            socket.onmessage = (event) => {
+                const msg = document.createElement("div");
+                msg.textContent = event.data;
+                document.getElementById("messages").appendChild(msg);
+            };
+
+            socket.onclose = () => {
+                console.log("Déconnecté. Tentative de reconnexion...");
+                setTimeout(connect, 1000);
+            };
+        }
+
+        document.getElementById("input").addEventListener("keydown", (e) => {
+            if (e.key === "Enter") {
+                const msg = e.target.value;
+                if (msg && socket.readyState === WebSocket.OPEN) {
+                    socket.send(msg);
+                    e.target.value = "";
+                }
+            }
+        });
+
+        connect();
+    </script>
+</body>
+</html>
