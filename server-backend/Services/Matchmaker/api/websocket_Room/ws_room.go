@@ -14,20 +14,12 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-type Client struct {
-	conn *websocket.Conn
-	send chan []byte
-}
-
-type Message struct {
-	client  *Client
-	content []byte
-}
+const MAX_CLIENTS = 100000
 
 var (
-	all_clients = make(map[*Client]bool)
-	broadcast   = make(chan Message)
-	mutex       = sync.Mutex{}
+	game_rooms   = make(map[string]*Room)
+	conn_clients = make(map[*Client]bool)
+	mutex        = sync.Mutex{}
 )
 
 var upgrader = websocket.Upgrader{
@@ -51,6 +43,29 @@ func HandleWebSocket(c *gin.Context) {
 			"type":    "error",
 		})
 		return
+	}
+
+	// Verify WebSocket maximum number of clients
+	if len(conn_clients) >= MAX_CLIENTS {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"success": false,
+			"message": "WebSocket is overloaded, please try again later",
+			"code":    503,
+			"type":    "error",
+		})
+		return
+	}
+
+	// Get the room
+	actual_room := game_rooms[room_target.RoomID]
+	if actual_room == nil {
+		actual_room = &Room{
+			ID:        room_target.RoomID,
+			clients:   make(map[string]*Client),
+			broadcast: make(chan []byte),
+		}
+		game_rooms[room_target.RoomID] = actual_room
+		go actual_room.ConnectBroadcast() // Start the broadcast goroutine
 	}
 
 	// --- Upgrade the connection to a WebSocket ---
@@ -78,38 +93,38 @@ func HandleWebSocket(c *gin.Context) {
 			"code":    500,
 			"type":    "error",
 		})
+		return
 	}
 
 	fmt.Printf("Vous êtes dans la room: %s\n", room_target.RoomID)
 	fmt.Printf("Vous êtes host: %t\n", is_host)
 
-	// New Client connected
-	fmt.Printf("(nbr: %d) ", len(all_clients))
+	// Create the client
+	fmt.Printf("(nbr: %d) ", len(conn_clients))
 	fmt.Println(">> Client connecté :", conn.RemoteAddr())
-	client := &Client{conn: conn, send: make(chan []byte)} // Create Client instance
-
-	go func() {
-		for msg := range client.send {
-			fmt.Printf("Envoi du message à %s: %s\n", conn.RemoteAddr(), msg)
-			if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
-				break
-			}
-		}
-	}()
-
 	mutex.Lock()
-	all_clients[client] = true // Register the client
+	client := actual_room.CreateClient(conn, user) // Create client and add it to the room
+	conn_clients[client] = true                    // Add the client to the map
 	mutex.Unlock()
 
 	conn.WriteJSON(gin.H{
 		"success": true,
 		"message": "You are now connected to the room!",
 		"room":    room_target,
-		"host":    is_host,
+		"owner":   is_host,
 		"type":    "info",
 	})
 
-	// Read messages from the client
+	// go func() {
+	// 	for msg := range client.send {
+	// 		fmt.Printf("Envoi du message à %s: %s\n", conn.RemoteAddr(), msg)
+	// 		if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+	// 			break
+	// 		}
+	// 	}
+	// }()
+
+	// --- Read messages from the client ---
 	for {
 		mt, msg, err := conn.ReadMessage()
 		if err != nil {
@@ -119,8 +134,9 @@ func HandleWebSocket(c *gin.Context) {
 
 		switch mt {
 		case websocket.TextMessage:
-			fmt.Printf("Message reçu de %s: %s\n", conn.RemoteAddr(), msg)
-			broadcast <- Message{client: client, content: msg} // Save to broadcast channel
+			fmt.Printf("Message reçu de %s: %b\n", conn.RemoteAddr(), msg)
+			actual_room.broadcast <- msg // Broadcast the message to all clients in the room
+			//broadcast <- Message{client: client, content: msg}             // Save to broadcast channel
 
 		case websocket.PongMessage:
 			// Optionnel : log du pong
@@ -131,28 +147,9 @@ func HandleWebSocket(c *gin.Context) {
 
 	// Déconnexion
 	mutex.Lock()
-	delete(all_clients, client)
+	actual_room.RemoveClient(client) // Remove the client from the room
+	delete(conn_clients, client)     // Remove the client from the map
 	mutex.Unlock()
-	close(client.send)
+
 	fmt.Println(">> Client déconnecté :", conn.RemoteAddr())
-}
-
-func StartMessageDispatcher() {
-	go func() { // Start a goroutine to handle broadcasting messages
-		for {
-			msg := <-broadcast // Wait for a message to be sent
-
-			mutex.Lock()
-			for c := range all_clients {
-				select {
-				case c.send <- msg.content: // Send the message to the channel client
-				default: // If the channel is full, close the connection
-					fmt.Printf("Fermeture de la connexion avec %s\n", c.conn.RemoteAddr())
-					close(c.send)
-					delete(all_clients, c)
-				}
-			}
-			mutex.Unlock()
-		}
-	}()
 }

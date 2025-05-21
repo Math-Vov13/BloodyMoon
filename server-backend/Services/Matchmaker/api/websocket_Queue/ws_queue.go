@@ -27,9 +27,10 @@ type status struct {
 
 func HandleWebSocket(c *gin.Context) {
 	if !serviceAvailable {
-		c.JSON(http.StatusInternalServerError, gin.H{
+		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"success": false,
 			"message": "Sorry, Queue Service is not available for the moment!",
+			"code":    http.StatusServiceUnavailable,
 			"type":    "error",
 		})
 		return

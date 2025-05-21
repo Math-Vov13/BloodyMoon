@@ -13,6 +13,16 @@ var fake_db = map[string]*users_models.DBUser{
 		Username: "test2",
 		Status:   "offline",
 	},
+	"567891": {
+		ID:       "567891",
+		Username: "test3",
+		Status:   "offline",
+	},
+	"56781564": {
+		ID:       "56781564",
+		Username: "test4",
+		Status:   "offline",
+	},
 }
 
 // func CreateUser(username string) *users_models.DBUser {

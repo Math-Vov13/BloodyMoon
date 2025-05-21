@@ -36,11 +36,12 @@ func main() {
 	//------ WEBSOCKETS ------//
 
 	// Queue WebSocket
+	// RateLimit : 3/10s
 	router.GET("/ws/queue", middlewares.VerifyUserMiddleware(), websocket_Queue.HandleWebSocket)
 
 	// Game WebSocket
+	// RateLimit : 3/10s
 	router.GET("/ws/room", middlewares.VerifyUserMiddleware(), websocket_Room.HandleWebSocket)
-	websocket_Room.StartMessageDispatcher()
 
 	//------ RUN SERVER ------//
 	// Start the server
