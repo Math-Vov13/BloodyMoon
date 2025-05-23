@@ -1,28 +1,14 @@
 package requests_models
 
 type RequestType string
-type ResponseType string
 
 const (
-	StatusMessage RequestType = "Message"
-	StatusConfig  RequestType = "Config"
-)
-
-const (
-	TypeError   ResponseType = "Error"
-	TypeMessage ResponseType = "Message"
-	TypeConfig  ResponseType = "Config"
+	TypeMessage RequestType = "Message" // Send Message to Chat
+	TypeConfig  RequestType = "Config"  // Change Game Config (only Host)
 )
 
 type RequestEvent struct {
-	Type    RequestType    `json:"type"`
-	Message string         `json:"message"`
+	Type    RequestType    `json:"type" validate:"required,min=3,max=20"`
+	Message string         `json:"message" validate:"required,min=3,max=50"`
 	Changes map[string]any `json:"changes"`
-}
-
-type ResponseEvent struct {
-	Success bool         `json:"success"`
-	Type    ResponseType `json:"type"`
-	Message string       `json:"message"`
-	Content string       `json:"content"`
 }

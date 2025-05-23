@@ -7,11 +7,6 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// type Client struct {
-// 	conn *websocket.Conn
-// 	send chan []byte
-// }
-
 type Client struct {
 	conn *websocket.Conn
 	send chan []byte
@@ -24,22 +19,16 @@ type Room struct {
 	broadcast chan []byte
 }
 
-func (r *Room) ConnectBroadcast() {
-	for {
-		select {
-		case message := <-r.broadcast:
-			fmt.Println("Broadcasting message to clients:", message)
-			for _, client := range r.clients {
-				err := client.conn.WriteMessage(websocket.TextMessage, message)
-				if err != nil {
-					// Gérer la déconnexion du client ici
-				}
-			}
-
-		default: // If the channel is full, close the connection
-			break
-		}
+// --- Rooms ---
+func CreateRoom(roomId string) (room *Room) {
+	room = &Room{
+		ID:        roomId,
+		clients:   make(map[string]*Client),
+		broadcast: make(chan []byte),
 	}
+	game_rooms[roomId] = room
+
+	return
 }
 
 func (r *Room) RemoveRoom() {
@@ -53,6 +42,7 @@ func (r *Room) RemoveRoom() {
 	}
 }
 
+// --- Clients ---
 func (r *Room) CreateClient(conn *websocket.Conn, player *users_models.User) (client *Client) {
 	// Create a new client
 	client = &Client{
@@ -67,13 +57,28 @@ func (r *Room) CreateClient(conn *websocket.Conn, player *users_models.User) (cl
 }
 
 func (r *Room) RemoveClient(client *Client) {
+	fmt.Printf("Client %s kicked from room %s\n", client.user.ID, r.ID)
 	delete(r.clients, client.user.ID)
 	close(client.send)
 	client.conn.Close()
 }
 
-func (r *Room) Broadcast(message []byte) {
-	for _, client := range r.clients {
+// --- Messages ---
+func (r *Room) BroadcastMessage(message []byte, excludeIds map[string]bool) {
+	for id, client := range r.clients {
+		if excludeIds != nil && excludeIds[id] {
+			continue
+		}
+		select {
+		case client.send <- message:
+		default:
+			r.RemoveClient(client)
+		}
+	}
+}
+
+func (r *Room) MutlicastMessage(message []byte, clients map[*Client]bool) {
+	for client := range clients {
 		select {
 		case client.send <- message:
 		default:
