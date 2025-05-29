@@ -3,6 +3,7 @@ package endpoints
 import (
 	"fmt"
 	"net/http"
+	"os"
 
 	"github.com/Math-Vov13/BloodyMoon/internal/database/cache_redis/cache_rooms"
 	"github.com/Math-Vov13/BloodyMoon/internal/database/mongodb"
@@ -13,9 +14,12 @@ import (
 
 func CreatePrivateGame(c *gin.Context) {
 	var user *users_models.User = c.MustGet("user").(*users_models.User)
+	c.Writer.Header().Set("Server", "localhost")
+	c.Writer.Header().Set("Origin", os.Getenv("URL"))
 
 	if mongodb.IsInGame(user.ID) {
 		// TODO:  Vérifie si la partie est terminée ou non
+		c.Writer.Header().Set("Cache-Control", "max-age=120") // no cache
 		c.JSON(http.StatusConflict, gin.H{
 			"message": "You are already in a room",
 		})
@@ -26,7 +30,9 @@ func CreatePrivateGame(c *gin.Context) {
 		RoomName: "room_name",
 		GameMode: "default",
 	})
+
 	if room == nil {
+		c.Writer.Header().Set("Cache-Control", "max-age=120") // no cache
 		c.JSON(http.StatusConflict, gin.H{
 			"message": "You can't create a room",
 		})
@@ -35,6 +41,7 @@ func CreatePrivateGame(c *gin.Context) {
 
 	fmt.Println("Room created: ", room)
 
+	c.Writer.Header().Set("Cache-Control", "no-store") // no cache
 	c.JSON(http.StatusCreated, gin.H{
 		"message":   "Your private room has been created",
 		"room_id":   room.RoomID,

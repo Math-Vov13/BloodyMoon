@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 
@@ -11,9 +12,15 @@ import (
 	"github.com/Math-Vov13/BloodyMoon/api/websocket_Room"
 	"github.com/Math-Vov13/BloodyMoon/internal/config"
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 )
 
 func main() {
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Error loading .env file:", err.Error())
+	}
+
 	// Initialize Gin router
 	router := gin.Default()
 	config.ConfigRuntime()
@@ -49,6 +56,6 @@ func main() {
 	if envPort := os.Getenv("Port"); envPort != "" {
 		port = envPort
 	}
-	fmt.Printf("\n> Server is running on %s:%s\n", os.Getenv("HOST"), port)
+	fmt.Printf("\n> Server is running on http://%s:%s\n", os.Getenv("HOST"), port)
 	router.Run(os.Getenv("HOST") + ":" + port)
 }
