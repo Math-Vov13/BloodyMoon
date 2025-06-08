@@ -35,6 +35,31 @@ func CreateRoom(roomId string, hostId string) (room *Room) {
 	return
 }
 
+func (r *Room) ChangeRoomHost() (newHost *users_models.User, err error) {
+	if r == nil {
+		fmt.Println("Tried to change host of nil Room")
+		err = fmt.Errorf("nil Room")
+		return
+	}
+	if len(r.clients) == 0 {
+		fmt.Println("No clients in room to change host")
+		err = fmt.Errorf("no clients in room %s", r.ID)
+		return
+	}
+
+	for id, player := range r.clients {
+		if id != r.hostID {
+			r.hostID = id // Change the host to the first client found
+			newHost = player.user
+			fmt.Printf("New host for room %s is %s\n", r.ID, newHost.ID)
+			return
+		}
+	}
+
+	err = fmt.Errorf("no suitable new host found for room %s", r.ID)
+	return
+}
+
 func (r *Room) RemoveRoom() (err error) {
 	if r == nil {
 		fmt.Println("Tried to remove nil Room")

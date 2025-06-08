@@ -70,13 +70,14 @@ func RemovePlayerFromRoom(playerId string, roomId string) bool {
 	return true
 }
 
-func ChangeRoomOwner(roomId string, newOwnerId string) bool {
+func ChangeRoomHost(roomId string, newOwnerId string) bool {
 	room := GetRoomByID(roomId)
 	if room == nil {
 		return false
 	}
+
+	DeleteRoom(roomId) // Remove the old room from cache
 	room.HostID = newOwnerId
-	DeleteRoom(roomId)   // Remove the old room from cache
 	RegenerateRoom(room) // Create a new room with the updated owner
 	return true
 }

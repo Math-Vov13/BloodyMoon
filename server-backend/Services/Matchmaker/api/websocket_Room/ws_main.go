@@ -108,16 +108,21 @@ func HandleWebSocket(c *gin.Context) {
 	}
 
 	// Check if the player is already in the room
-	var is_host = (user.ID == room_target.HostID)
+	var is_host = (user.ID == actual_room.hostID)
 	if is_host {
-		cache_rooms.ChangeRoomStatus(room_target.RoomID, rooms_models.StatusActive)
+		cache_rooms.ChangeRoomStatus(actual_room.ID, rooms_models.StatusActive)
 	} else {
 		// TODO : CAUTION ! This solution does not work for AFK players
-		cache_rooms.AddPlayerToRoom(user.ID, room_target.RoomID)
+		cache_rooms.AddPlayerToRoom(user.ID, actual_room.ID)
 	}
+	defer func() {
+		if excited {
+			cache_rooms.RemovePlayerFromRoom(user.ID, actual_room.ID)
+		}
+	}()
 
 	// Change the user's status to "in room"
-	if succ := mongodb.ChangeUserStatus(user.ID, users_models.StatusInRoom, room_target.RoomID); !succ {
+	if succ := mongodb.ChangeUserStatus(user.ID, users_models.StatusInRoom, actual_room.ID); !succ {
 		conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(
 			websocket.CloseInternalServerErr,
 			"Internal error",
@@ -125,7 +130,7 @@ func HandleWebSocket(c *gin.Context) {
 		return
 	}
 
-	fmt.Printf("User has joined the room: %s\n", room_target.RoomID)
+	fmt.Printf("User has joined the room: %s\n", actual_room.ID)
 	fmt.Printf("User is host: %t\n", is_host)
 
 	// Create the client
@@ -134,9 +139,20 @@ func HandleWebSocket(c *gin.Context) {
 	conn_clients[client] = true                    // Add the client to the map
 	mutex.Unlock()
 	fmt.Printf(">> Client connected : %s (total: %d)\n", conn.RemoteAddr(), len(conn_clients))
+	defer func() {
+		if excited {
+			actual_room.RemoveClient(client) // Remove the client from the room
+			mongodb.ChangeUserStatus(user.ID, users_models.StatusOffline, "")
+		}
+	}()
 
 	// --- Start the ping ticker ---
 	ticker := time.NewTicker(pingPeriod)
+	defer func() {
+		if excited {
+			ticker.Stop() // Stop the ticker when the connection is closed
+		}
+	}()
 	if err = conn.SetReadDeadline(time.Now().Add(pongWait)); err != nil {
 		log.Println("Error setting read deadline:", err)
 		conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(
@@ -162,11 +178,6 @@ func HandleWebSocket(c *gin.Context) {
 		}
 		return nil
 	})
-	defer func() {
-		if excited {
-			ticker.Stop() // Stop the ticker when the connection is closed
-		}
-	}()
 
 	go func() {
 		for msg := range client.send {
@@ -182,7 +193,7 @@ func HandleWebSocket(c *gin.Context) {
 			// Envoie le ping
 			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				log.Printf("Error sending Ping: '%v'\n", err)
-				continue
+				break
 			}
 
 			log.Println("Ping sent!")
@@ -190,54 +201,50 @@ func HandleWebSocket(c *gin.Context) {
 		fmt.Println("Ticker stopped!")
 	}()
 
-	// Say Welcome to the client !
-	// --> client
-	client.send <- prepareMessage(gin.H{
-		"success": true,
-		"message": "You are now connected to the room!",
-		"room":    room_target,
-		"owner":   is_host,
-		"type":    "info",
-	}) // Send the message to the client
-
-	// --> all clients in the room
-	actual_room.BroadcastMessage(prepareMessage(responses_models.ResponseForSystem{
-		BaseResponse: responses_models.BaseResponse{
-			Code:    200,
-			Type:    responses_models.TypeSystem,
-			Message: fmt.Sprintf("User '%s' has joined the room", user.Username),
-		},
-		Content: gin.H{
-			"status":   "joined",
-			"user_id":  user.ID,
-			"username": user.Username,
-		},
-	}), map[string]bool{
-		user.ID: true,
-	})
-
 	// --- Read messages from the client ---
 	go func() {
 		defer func(actual_room *Room) {
+			defer func() {
+				// Choose a new host if the current host is leaving
+				if len(actual_room.clients) == 0 {
+					fmt.Printf("No more clients: deleting Room (%s)\n", actual_room.ID)
+					fmt.Printf("Deleted: %v\n\n", cache_rooms.DeleteRoom(actual_room.ID)) // Delete the room if no clients are left
+					mutex.Lock()
+					actual_room.RemoveRoom() // Remove the room from the map
+					mutex.Unlock()
+				} else {
+					if user.ID == actual_room.hostID {
+						// TODO: Change the host if the current host is leaving
+						newHost, err := actual_room.ChangeRoomHost()
+						if err != nil {
+							fmt.Printf("Error changing host: %v\n", err)
+						} else {
+							fmt.Printf("New host for room %s is %s\n", actual_room.ID, newHost.ID)
+							// Notify all clients about the new host
+							cache_rooms.ChangeRoomHost(actual_room.ID, newHost.ID)
+							actual_room.BroadcastMessage(prepareMessage(responses_models.ResponseForSystem{
+								BaseResponse: responses_models.BaseResponse{
+									Code:    200,
+									Type:    responses_models.TypeSystem,
+									Message: fmt.Sprintf("New Host '%s' choosed for the room", newHost.Username),
+								},
+								Content: gin.H{
+									"status":   "host_changed",
+									"user_id":  newHost.ID,
+									"username": newHost.Username,
+								},
+							}), nil)
+						}
+					}
+				}
+			}()
 			ticker.Stop()
 			// Déconnexion
 			mutex.Lock()
 			actual_room.RemoveClient(client) // Remove the client from the room
 			mutex.Unlock()
-			cache_rooms.RemovePlayerFromRoom(user.ID, room_target.RoomID)
+			cache_rooms.RemovePlayerFromRoom(user.ID, actual_room.ID)
 			mongodb.ChangeUserStatus(user.ID, users_models.StatusOffline, "")
-
-			if len(actual_room.clients) == 0 {
-				fmt.Printf("No more clients: deleting Room (%s)\n", actual_room.ID)
-				cache_rooms.DeleteRoom(actual_room.ID) // Delete the room if no clients are left
-				mutex.Lock()
-				actual_room.RemoveRoom() // Remove the room from the map
-				mutex.Unlock()
-			} else {
-				if is_host {
-					// TODO: Change the host if the current host is leaving
-				}
-			}
 
 			mutex.Lock()
 			delete(conn_clients, client) // Remove the client from the map
@@ -260,6 +267,7 @@ func HandleWebSocket(c *gin.Context) {
 			fmt.Printf("<< Client disconnected : %s (total: %d)\n", conn.RemoteAddr(), len(conn_clients))
 		}(actual_room)
 
+		// Read Messages from the client
 		for {
 			mt, msg, err := conn.ReadMessage()
 			if err != nil {
@@ -288,7 +296,7 @@ func HandleWebSocket(c *gin.Context) {
 				}
 
 				if reqMessage.Type == requests_models.TypeConfig {
-					if !is_host {
+					if !(user.ID == actual_room.hostID) {
 						client.send <- prepareMessage(gin.H{
 							"success": false,
 							"message": "You are not the host of the room",
@@ -314,6 +322,32 @@ func HandleWebSocket(c *gin.Context) {
 			}
 		}
 	}()
+
+	// Say Welcome to the client !
+	// --> client
+	client.send <- prepareMessage(gin.H{
+		"success": true,
+		"message": "You are now connected to the room!",
+		"room":    actual_room,
+		"owner":   is_host,
+		"type":    "info",
+	}) // Send the message to the client
+
+	// --> all clients in the room
+	actual_room.BroadcastMessage(prepareMessage(responses_models.ResponseForSystem{
+		BaseResponse: responses_models.BaseResponse{
+			Code:    200,
+			Type:    responses_models.TypeSystem,
+			Message: fmt.Sprintf("User '%s' has joined the room", user.Username),
+		},
+		Content: gin.H{
+			"status":   "joined",
+			"user_id":  user.ID,
+			"username": user.Username,
+		},
+	}), map[string]bool{
+		user.ID: true,
+	})
 
 	excited = false
 }
