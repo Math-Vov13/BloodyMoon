@@ -1,11 +1,11 @@
 package websocket_Room
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/Math-Vov13/BloodyMoon/internal/database/cache_redis/cache_rooms"
 	"github.com/Math-Vov13/BloodyMoon/internal/database/mongodb"
@@ -37,12 +37,26 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+const (
+	// writeWait = 10 * time.Second
+
+	maxPongLoseTime     = 60 * time.Second // maximum pong wait time
+	maxPongResponseTime = 5 * time.Second  // temps d'attente pour le pong
+
+	pongWait   = 30 * time.Second
+	pingPeriod = pongWait - maxPongResponseTime // ping un peu avant le timeout
+)
+
 func HandleWebSocket(c *gin.Context) {
 	user := c.MustGet("user").(*users_models.User)
+	excited := true
 
 	// --- Verify Room and Player Access ---
 	room_target, err1, errcode := verifyAccesstoRoom(c, user)
 	if err1 != "" {
+		c.Writer.Header().Set("Retry-After", "30")         // 30 seconds
+		c.Writer.Header().Set("Cache-Control", "no-cache") // no cache
+		c.Writer.Header().Set("Connection", "close")       // close connection
 		c.JSON(errcode, gin.H{
 			"success": false,
 			"message": "Error connecting to the room: " + err1,
@@ -76,16 +90,21 @@ func HandleWebSocket(c *gin.Context) {
 			"code":    http.StatusUpgradeRequired,
 			"type":    "error",
 		})
-		log.Println("Erreur WebSocket :", err)
+		log.Println("Upgrade connection error:", err)
 		return
 	}
-	defer conn.Close()
+	defer func() {
+		if excited {
+			conn.Close()
+		}
+	}()
 
 	// --- Add the player to the room ---
 	// Get the room
 	actual_room := game_rooms[room_target.RoomID]
 	if actual_room == nil {
-		actual_room = CreateRoom(room_target.RoomID) // Create the room if it doesn't exist
+		fmt.Println("Room not found, creating a new one")
+		actual_room = CreateRoom(room_target.RoomID, room_target.HostID) // Create the room if it doesn't exist
 	}
 
 	// Check if the player is already in the room
@@ -99,31 +118,76 @@ func HandleWebSocket(c *gin.Context) {
 
 	// Change the user's status to "in room"
 	if succ := mongodb.ChangeUserStatus(user.ID, users_models.StatusInRoom, room_target.RoomID); !succ {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"message": "Error connecting to the room: " + "Internal error",
-			"code":    500,
-			"type":    "error",
-		})
+		conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(
+			websocket.CloseInternalServerErr,
+			"Internal error",
+		))
 		return
 	}
 
-	fmt.Printf("Vous êtes dans la room: %s\n", room_target.RoomID)
-	fmt.Printf("Vous êtes host: %t\n", is_host)
+	fmt.Printf("User has joined the room: %s\n", room_target.RoomID)
+	fmt.Printf("User is host: %t\n", is_host)
 
 	// Create the client
 	mutex.Lock()
 	client := actual_room.CreateClient(conn, user) // Create client and add it to the room
 	conn_clients[client] = true                    // Add the client to the map
 	mutex.Unlock()
-	fmt.Printf(">> Client connecté : %s (total: %d)\n", conn.RemoteAddr(), len(conn_clients))
+	fmt.Printf(">> Client connected : %s (total: %d)\n", conn.RemoteAddr(), len(conn_clients))
+
+	// --- Start the ping ticker ---
+	ticker := time.NewTicker(pingPeriod)
+	if err = conn.SetReadDeadline(time.Now().Add(pongWait)); err != nil {
+		log.Println("Error setting read deadline:", err)
+		conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(
+			websocket.CloseInternalServerErr,
+			"Internal error",
+		))
+		return
+	}
+	// Set the ping handler to update the last ping time
+	conn.SetPongHandler(func(appData string) error {
+		log.Println("pong received")
+		mutex.Lock()
+		client.lastPing = time.Now().Unix() // Update the last ping time
+		mutex.Unlock()
+		//ticker.Reset(pingPeriod) // Reset the ticker
+		if err = conn.SetReadDeadline(time.Now().Add(pongWait)); err != nil {
+			log.Println("Error setting read deadline:", err)
+			conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(
+				websocket.CloseInternalServerErr,
+				"Internal error",
+			))
+			return fmt.Errorf("error setting read deadline: %w", err)
+		}
+		return nil
+	})
+	defer func() {
+		if excited {
+			ticker.Stop() // Stop the ticker when the connection is closed
+		}
+	}()
 
 	go func() {
 		for msg := range client.send {
 			if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+				fmt.Printf("Writting Message error: '%v'\n", err)
 				break
 			}
 		}
+		fmt.Println("Client send channel closed, stopping goroutine")
+	}()
+	go func() {
+		for range ticker.C {
+			// Envoie le ping
+			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				log.Printf("Error sending Ping: '%v'\n", err)
+				continue
+			}
+
+			log.Println("Ping sent!")
+		}
+		fmt.Println("Ticker stopped!")
 	}()
 
 	// Say Welcome to the client !
@@ -153,86 +217,103 @@ func HandleWebSocket(c *gin.Context) {
 	})
 
 	// --- Read messages from the client ---
-	for {
-		mt, msg, err := conn.ReadMessage()
-		if err != nil {
-			log.Println("Read error:", err)
-			break
-		}
+	go func() {
+		defer func(actual_room *Room) {
+			ticker.Stop()
+			// Déconnexion
+			mutex.Lock()
+			actual_room.RemoveClient(client) // Remove the client from the room
+			mutex.Unlock()
+			cache_rooms.RemovePlayerFromRoom(user.ID, room_target.RoomID)
+			mongodb.ChangeUserStatus(user.ID, users_models.StatusOffline, "")
 
-		switch mt {
-		case websocket.TextMessage:
-			// Unmarshal JSON into the Message struct
-			var MessageRequest requests_models.RequestEvent
-			if err := json.Unmarshal(msg, &MessageRequest); err != nil {
-				log.Println("JSON unmarshal error:", err)
-				client.send <- prepareMessage(gin.H{
-					"success": false,
-					"message": "Error decoding message: " + err.Error(),
-					"code":    400,
-					"error":   err.Error(),
-					"type":    "error",
-				})
-				continue
+			if len(actual_room.clients) == 0 {
+				fmt.Printf("No more clients: deleting Room (%s)\n", actual_room.ID)
+				cache_rooms.DeleteRoom(actual_room.ID) // Delete the room if no clients are left
+				mutex.Lock()
+				actual_room.RemoveRoom() // Remove the room from the map
+				mutex.Unlock()
+			} else {
+				if is_host {
+					// TODO: Change the host if the current host is leaving
+				}
 			}
 
-			// Validate the message
-			if err := validate.Struct(MessageRequest); err != nil {
-				log.Println("Validation error:", err)
-				client.send <- prepareMessage(gin.H{
-					"success": false,
-					"message": "Error decoding message: " + err.Error(),
-					"code":    422,
-					"error":   err.Error(),
-					"type":    "error",
-				})
-				continue
-			}
+			mutex.Lock()
+			delete(conn_clients, client) // Remove the client from the map
+			mutex.Unlock()
 
-			if MessageRequest.Type == requests_models.TypeConfig {
-				if !is_host {
+			actual_room.BroadcastMessage(prepareMessage(responses_models.ResponseForSystem{
+				BaseResponse: responses_models.BaseResponse{
+					Code:    200,
+					Type:    responses_models.TypeSystem,
+					Message: fmt.Sprintf("User '%s' left the room", user.Username),
+				},
+				Content: gin.H{
+					"status":   "left",
+					"user_id":  user.ID,
+					"username": user.Username,
+				},
+			}), map[string]bool{
+				user.ID: true,
+			})
+			fmt.Printf("<< Client disconnected : %s (total: %d)\n", conn.RemoteAddr(), len(conn_clients))
+		}(actual_room)
+
+		for {
+			mt, msg, err := conn.ReadMessage()
+			if err != nil {
+				log.Printf("Reading Message error: '%v'", err)
+				conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(
+					websocket.CloseMessage,
+					"Ping Timeout or Read Error",
+				))
+				return
+			}
+			// conn.SetWriteDeadline(time.Now().Add(writeWait))
+
+			switch mt {
+			case websocket.TextMessage:
+				reqMessage, code, err := decodeMessage(msg)
+				if err != nil {
+					log.Println("Message decode error:", err)
 					client.send <- prepareMessage(gin.H{
 						"success": false,
-						"message": "You are not the host of the room",
-						"code":    403,
-						"error":   "Host only",
+						"message": "Error in Message validation",
+						"code":    code,
+						"error":   err.Error(),
 						"type":    "error",
 					})
-					break
+					continue
 				}
-				// TODO : Change the game configuration
+
+				if reqMessage.Type == requests_models.TypeConfig {
+					if !is_host {
+						client.send <- prepareMessage(gin.H{
+							"success": false,
+							"message": "You are not the host of the room",
+							"code":    403,
+							"error":   "Host only",
+							"type":    "error",
+						})
+						continue
+					}
+					// TODO : Change the game configuration
+				}
+
+				fmt.Printf("Message received from %s: '%v'\n", conn.RemoteAddr(), reqMessage.Message)
+				actual_room.BroadcastMessage(prepareMessage(reqMessage), nil)
+
+			default:
+				log.Printf("Received non-text message type: %d\n", mt)
+				conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(
+					websocket.CloseUnsupportedData,
+					"Only text messages are supported",
+				))
+				return
 			}
-
-			fmt.Printf("Message reçu de %s: %v\n", conn.RemoteAddr(), MessageRequest.Message)
-			actual_room.BroadcastMessage(prepareMessage(MessageRequest), nil)
-
-		case websocket.PongMessage:
-			// Optionnel : log du pong
-			log.Println("Pong reçu")
-
 		}
-	}
+	}()
 
-	// Déconnexion
-	mutex.Lock()
-	actual_room.RemoveClient(client) // Remove the client from the room
-	cache_rooms.RemovePlayerFromRoom(user.ID, room_target.RoomID)
-	delete(conn_clients, client) // Remove the client from the map
-	mutex.Unlock()
-
-	actual_room.BroadcastMessage(prepareMessage(responses_models.ResponseForSystem{
-		BaseResponse: responses_models.BaseResponse{
-			Code:    200,
-			Type:    responses_models.TypeSystem,
-			Message: fmt.Sprintf("User '%s' left the room", user.Username),
-		},
-		Content: gin.H{
-			"status":   "left",
-			"user_id":  user.ID,
-			"username": user.Username,
-		},
-	}), map[string]bool{
-		user.ID: true,
-	})
-	fmt.Printf("<< Client déconnecté : %s (total: %d)\n", conn.RemoteAddr(), len(conn_clients))
+	excited = false
 }

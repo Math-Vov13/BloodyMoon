@@ -1,10 +1,7 @@
 package websocket_Room
 
 import (
-	"encoding/json"
-
 	"github.com/Math-Vov13/BloodyMoon/internal/database/cache_redis/cache_rooms"
-	"github.com/Math-Vov13/BloodyMoon/models/responses_models"
 	"github.com/Math-Vov13/BloodyMoon/models/rooms_models"
 	"github.com/Math-Vov13/BloodyMoon/models/users_models"
 	"github.com/gin-gonic/gin"
@@ -77,21 +74,4 @@ func removeClientFromRoom(client *Client) {
 
 	// // Update the room in the cache
 	// cache_rooms.ChangeRoomStatus(room.RoomID, rooms_models.StatusActive)
-}
-
-func prepareMessage(message any) (msg []byte) {
-	// Prepare the message to be sent to the client
-	msg, err := json.Marshal(message)
-	if err != nil {
-		msg, _ = json.Marshal(responses_models.ResponseForError{
-			BaseResponse: responses_models.BaseResponse{
-				Code:    500,
-				Type:    responses_models.TypeError,
-				Message: "Error when sending message",
-			},
-			Error: err.Error(),
-		})
-		return
-	}
-	return
 }

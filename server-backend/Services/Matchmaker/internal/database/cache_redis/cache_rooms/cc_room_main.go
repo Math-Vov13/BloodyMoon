@@ -33,7 +33,7 @@ func CreateRoom(host *users_models.User, configs *rooms_models.RoomConfig) *room
 	}
 
 	// Create a new game
-	room := rooms_models.RoomCreated{
+	room := &rooms_models.RoomCreated{
 		RoomID:    id_generated,
 		JoinCode:  code_generated,
 		HostID:    host.ID,
@@ -53,8 +53,13 @@ func CreateRoom(host *users_models.User, configs *rooms_models.RoomConfig) *room
 	// 	return nil
 	// }
 
-	fake_cache[host.ID] = &room
-	return &room
+	fake_cache[host.ID] = room
+	return room
+}
+
+func RegenerateRoom(room *rooms_models.RoomCreated) *rooms_models.RoomCreated {
+	fake_cache[room.HostID] = room
+	return room
 }
 
 func JoinRoom(hostId string, roomId string) bool {
@@ -114,12 +119,18 @@ func LeaveRoom(hostId string, roomId string) bool {
 	return false
 }
 
-func DeleteRoom(host *users_models.User) {
+func DeleteRoom(roomID string) bool {
 	// Delete the game from Redis
 	// err := rdb.Del("game:"+host.ID).Err()
 	// if err != nil {
 	// 	return
 	// }
 
-	delete(fake_cache, host.ID)
+	room := GetRoomByID(roomID)
+	if room == nil {
+		return false
+	}
+
+	delete(fake_cache, room.HostID)
+	return true
 }

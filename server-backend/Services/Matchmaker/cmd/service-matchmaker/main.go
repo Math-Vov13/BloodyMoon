@@ -16,7 +16,7 @@ import (
 )
 
 func main() {
-	err := godotenv.Load()
+	err := godotenv.Load("../../.env") // Load environment variables from .env file
 	if err != nil {
 		log.Fatal("Error loading .env file:", err.Error())
 	}
@@ -57,5 +57,7 @@ func main() {
 		port = envPort
 	}
 	fmt.Printf("\n> Server is running on http://%s:%s\n", os.Getenv("HOST"), port)
-	router.Run(os.Getenv("HOST") + ":" + port)
+	if router.Run(os.Getenv("HOST")+":"+port) != nil {
+		log.Fatal("Server exited:", err)
+	}
 }
