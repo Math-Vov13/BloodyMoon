@@ -1,0 +1,34 @@
+services:
+  cache:
+    image: redis:alpine
+    volumes:
+      - cache_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - mynetwork
+
+  database:
+    image: mariadb:10.6.22-ubi9
+    environment:
+      - MARIADB_ROOT_PASSWORD=root
+      # - MARIADB_ROOT_PASSWORD_HASH=your_database
+      # - MARIADB_ALLOW_EMPTY_ROOT_PASSWORD=true
+      # - MARIADB_RANDOM_ROOT_PASSWORD=your_password
+    volumes:
+      - database_data:/data
+      - ./src/MariaDB/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "3306:3306"
+    networks:
+      - mynetwork
+
+networks:
+  mynetwork:
+    driver: bridge
+
+volumes:
+  database_data:
+    driver: local
+  cache_data:
+    driver: local
