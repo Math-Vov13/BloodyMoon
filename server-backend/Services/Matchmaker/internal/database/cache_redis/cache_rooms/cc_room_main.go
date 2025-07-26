@@ -42,7 +42,7 @@ func CreateRoom(host *users_models.User, configs *rooms_models.RoomConfig) *room
 		CreatedAt: time.Now().Unix(),
 		RoomConfig: rooms_models.RoomConfig{
 			RoomName:   "room_name",
-			MaxPlayers: 10,
+			MaxPlayers: 16,
 			GameMode:   "default",
 		},
 	}

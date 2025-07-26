@@ -6,10 +6,10 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/Math-Vov13/BloodyMoon/api/endpoints"
-	"github.com/Math-Vov13/BloodyMoon/api/middlewares"
-	"github.com/Math-Vov13/BloodyMoon/api/websocket_Queue"
-	"github.com/Math-Vov13/BloodyMoon/api/websocket_Room"
+	"github.com/Math-Vov13/BloodyMoon/internal/api/endpoints"
+	"github.com/Math-Vov13/BloodyMoon/internal/api/middlewares"
+	"github.com/Math-Vov13/BloodyMoon/internal/api/websocket_Queue"
+	"github.com/Math-Vov13/BloodyMoon/internal/api/websocket_Room"
 	"github.com/Math-Vov13/BloodyMoon/internal/config"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
@@ -52,7 +52,7 @@ func main() {
 
 	//------ RUN SERVER ------//
 	// Start the server
-	port := "8001"
+	port := "80" // Default port
 	if envPort := os.Getenv("Port"); envPort != "" {
 		port = envPort
 	}

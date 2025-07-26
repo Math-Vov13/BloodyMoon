@@ -16,7 +16,7 @@ func VerifyUserMiddleware() gin.HandlerFunc {
 			if username == "" {
 				ctx.JSON(http.StatusBadRequest, gin.H{
 					"env":     "development",
-					"message": "You must provide a username!",
+					"message": "You must provide a username! (key: testName)",
 				})
 				ctx.Abort()
 				return
@@ -26,7 +26,7 @@ func VerifyUserMiddleware() gin.HandlerFunc {
 			if user_db == nil {
 				ctx.JSON(http.StatusBadRequest, gin.H{
 					"env":     "development",
-					"message": "You must provide a valid username!",
+					"message": "You must provide a valid username! (key: testName)",
 				})
 				ctx.Abort()
 				return

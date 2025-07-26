@@ -15,7 +15,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN go build -o ./service ./cmd
+RUN go build -o ./service ./cmd/service-matchmaker/
 
 EXPOSE 8080
 

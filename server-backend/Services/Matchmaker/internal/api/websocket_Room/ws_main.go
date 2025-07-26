@@ -18,7 +18,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-const MAX_CLIENTS = 100000
+const MAX_CLIENTS = 1024 * 50 // Maximum number of clients allowed in the WebSocket server
 
 // Validator instance
 var validate = validator.New()
@@ -279,6 +279,7 @@ func HandleWebSocket(c *gin.Context) {
 				return
 			}
 			// conn.SetWriteDeadline(time.Now().Add(writeWait))
+			conn.SetReadLimit(1024 * 5) // Set a limit for the message size
 
 			switch mt {
 			case websocket.TextMessage:
@@ -295,7 +296,7 @@ func HandleWebSocket(c *gin.Context) {
 					continue
 				}
 
-				if reqMessage.Type == requests_models.TypeConfig {
+				if reqMessage.Action == requests_models.TypeConfig {
 					if !(user.ID == actual_room.hostID) {
 						client.send <- prepareMessage(gin.H{
 							"success": false,

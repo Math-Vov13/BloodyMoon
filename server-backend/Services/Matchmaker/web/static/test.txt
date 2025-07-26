@@ -1,0 +1,10 @@
+package static
+// Static files for the Matchmaker service
+// This file is auto-generated and should not be edited manually.
+// It contains paths to static files used by the Matchmaker service.
+const (
+    TestFilePath = "web/static/test.txt" // Path to the test file
+)
+
+// This file is used to manage static files in the Matchmaker service.
+// It includes paths to files that are used in the service, such as HTML, CSS,

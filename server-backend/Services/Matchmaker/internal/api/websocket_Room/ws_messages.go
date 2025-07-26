@@ -28,6 +28,13 @@ func prepareMessage(message any) (msg []byte) {
 func decodeMessage(p []byte) (msg *requests_models.RequestEvent, code int, err error) {
 	code = 200 // Default success code
 
+	// Verify message length
+	if len(p) == 0 {
+		code = 400 // Bad Request
+		err = fmt.Errorf("empty message received")
+		return
+	}
+
 	// Unmarshal JSON into the Message struct
 	if err1 := json.Unmarshal(p, &msg); err1 != nil {
 		code = 400 // Bad Request
@@ -43,9 +50,9 @@ func decodeMessage(p []byte) (msg *requests_models.RequestEvent, code int, err e
 	}
 
 	// Check if the message type is valid
-	if msg.Type != requests_models.TypeMessage && msg.Type != requests_models.TypeConfig {
+	if msg.Action != requests_models.TypeMessage && msg.Action != requests_models.TypeConfig && msg.Action != requests_models.TypePlay {
 		code = 422 // Unprocessable Entity
-		err = fmt.Errorf("invalid request type: %v", msg.Type)
+		err = fmt.Errorf("invalid request action: %v", msg.Action)
 		return
 	}
 

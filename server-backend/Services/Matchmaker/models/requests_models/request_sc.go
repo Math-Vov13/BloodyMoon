@@ -1,14 +1,16 @@
 package requests_models
 
-type RequestType string
+type RequestAction string
 
 const (
-	TypeMessage RequestType = "Message" // Send Message to Chat
-	TypeConfig  RequestType = "Config"  // Change Game Config (only Host)
+	TypeMessage RequestAction = "Message" // Send Message to Chat
+	TypeConfig  RequestAction = "Config"  // Change Game Config (only Host)
+	TypePlay    RequestAction = "Play"    // Play Game (only Host)
+	TypeKick    RequestAction = "Kick"    // Kick Player (only Host)
 )
 
 type RequestEvent struct {
-	Type    RequestType    `json:"type" validate:"required,min=3,max=20"`
+	Action  RequestAction  `json:"action" validate:"required,min=3,max=20"`
 	Message string         `json:"message" validate:"required,min=3,max=50"`
 	Changes map[string]any `json:"changes"`
 }

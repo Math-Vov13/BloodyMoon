@@ -11,7 +11,7 @@ const (
 type RoomConfig struct {
 	RoomName   string `json:"room_name"`
 	GameMode   string `json:"game_mode" default:"default"`
-	MaxPlayers int    `json:"max_players" default:"10"`
+	MaxPlayers int    `json:"max_players" default:"16"`
 	Landscape  string `json:"landscape" default:"default"`
 }
 
