@@ -1,28 +1,140 @@
 <!DOCTYPE html>
 <html lang="fr">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Chat WebSocket avec Gin</title>
     <style>
-        #messages { border: 1px solid #ccc; height: 300px; overflow-y: scroll; padding: 10px; }
+        .main {
+            display: grid;
+            grid-template-columns: auto 30%;
+            padding-left: 30px;
+            padding-right: 30px;
+            padding-bottom: 30px;
+        }
+
+        #messages {
+            border: 1px solid #ccc;
+            height: 300px;
+            overflow-y: scroll;
+            padding: 10px;
+        }
+
+        #messages :nth-child(){
+            border: #1023b9a1;
+        }
+
+        #players {
+            border: 1px solid #07d144;
+            height: 300px;
+            overflow-y: scroll;
+            padding: 10px;
+        }
     </style>
 </head>
+
 <body>
-    <h1>Chat Room</h1>
-    <div id="messages"></div>
+    <h1>Room WebSocket</h1>
+    <p id="host_text" style="display: block;">You're the Host</p>
+    <div class="main">
+        <div id="messages"></div>
+        <div id="players"></div>
+        <div id="console"><button type="button" style="position: absolute; right: 0;" onclick="clearConsole()">Clear</button></div>
+
+    </div>
     <input id="input" placeholder="Votre message" autocomplete="off" />
 
     <script>
         let socket;
+        let Code;
+        let UserName;
+        let Host = false;
+        const players = {};
+
+        function setup() {
+            if (!location.host) {
+                alert("Veuillez lancer le serveur d'abord !");
+                return;
+            }
+
+            Code = prompt("Code de la Room:")
+            const ParamsURL = window.location.search.substring(1);
+            UserName = ParamsURL.split("username=")[1] || prompt("Nom du Joueur:");
+
+            if (!Code) {
+                alert("Code non valide");
+                return;
+            }
+
+            if (!UserName) {
+                alert("Nom d'utilisateur non valide");
+                return;
+            }
+
+            addPlayer("me", UserName);
+
+            const res = fetch("http://" + location.host + "/rooms/connect?testName=" + UserName + "&code=" + Code, {
+                method: "POST"
+            }).then(async response => {
+                if (response.ok) {
+                    console.log("Connexion réussie");
+                    const data = await response.json();
+                    console.log("Données reçues:", data);
+                    const players = data.players || [];
+                    console.log("Joueurs dans la room:", players);
+                    players.forEach(player_id => {
+                        console.log("Ajout du joueur:", player_id);
+                        addPlayer(player_id, player_id);
+                    });
+
+                } else {
+                    alert("Erreur de connexion: " + response.statusText);
+                    return;
+                }
+            }).catch(error => {
+                console.error("Erreur de connexion:", error);
+                alert("Erreur de connexion: " + error.message);
+            });
+
+            connect();
+        }
 
         function connect() {
-            socket = new WebSocket("ws://" + location.host + "/ws/room");
+            console.log("Connexion au WebSocket...");
+            socket = new WebSocket("ws://" + location.host + "/ws/room?testName=" + UserName + "&code=" + Code);
 
             socket.onmessage = (event) => {
-                const msg = document.createElement("div");
-                msg.textContent = event.data;
-                document.getElementById("messages").appendChild(msg);
+                const data = JSON.parse(event.data);
+
+                // Acknowledge the connection
+                if (data.type == "Ack") {
+                    console.log("Connexion établie avec succès:", data);
+                    Host = data.content.owner;
+                    changeHost();
+                }
+
+                // System messages
+                if (data.type == "System" && data.content != null) {
+                    if (data.content.status == "player_joined") {
+                        addPlayer(data.content.user_id, data.content.username)
+                    } else if (data.content.status == "player_left") {
+                        removePlayer(data.content.user_id, data.content.username)
+                    } else if (data.content.status == "host_changed") {
+                        if (data.content.username == UserName) {
+                            document.getElementById("host_text").style.display = "block";
+                        } else {
+                            document.getElementById("host_text").style.display = "none";
+                        }
+                    }
+                }
+
+                // Messages
+                if (data.type == "Message") {
+                    addMessage(data.author, data.content);
+                }
+
+                addConsoleMessage(event.data);
             };
 
             socket.onclose = () => {
@@ -31,17 +143,91 @@
             };
         }
 
+        // Host
+        function changeHost() {
+            if (Host) {
+                alert("Vous êtes déjà l'hôte de cette room.");
+                return;
+            }
+            Host = true;
+            document.getElementById("host_text").style.display = "block";
+            socket.send(JSON.stringify({
+                "action": "ChangeHost",
+                "user_id": UserName
+            }));
+        }
+
+
+        // Console
+        function addConsoleMessage(content) {
+            const msg = document.createElement("div");
+            msg.className = "output"
+            msg.textContent = "[" + Date.now().toString() + "] - " + content;
+            document.getElementById("console").appendChild(msg);
+        }
+
+        function clearConsole() {
+            const consoleDiv = document.getElementsByClassName("output");
+            while (consoleDiv.length > 0) {
+                consoleDiv[0].parentNode.removeChild(consoleDiv[0]);
+            }
+        }
+
+        // Messages
+        function addMessage(author, content) {
+            const msg = document.createElement("div");
+            msg.className = "message"
+            msg.textContent = author + ": " + content;
+            document.getElementById("messages").appendChild(msg);
+
+            const kickbtn = document.createElement("button");
+            kickbtn.textContent = "Kick";
+            kickbtn.onclick = () => {
+                socket.send(JSON.stringify({
+                    "action": "KickPlayer",
+                    "user_id": author,
+                    "target": author
+                }));
+            };
+
+            if (!Host) {
+                kickbtn.style.display = "none";
+            } else {
+                kickbtn.style.display = "inline-block";
+            }
+
+            msg.appendChild(kickbtn);
+        }
+
+        // Players
+        function addPlayer(userid, username) {
+            const msg = document.createElement("div");
+            msg.className = "player"
+            msg.id = userid
+            msg.textContent = username;
+            document.getElementById("players").appendChild(msg);
+        }
+        function removePlayer(userid, username) {
+            const doc = document.getElementById(userid)
+            if (!doc) return;
+            doc.remove();
+        }
+
         document.getElementById("input").addEventListener("keydown", (e) => {
             if (e.key === "Enter") {
                 const msg = e.target.value;
                 if (msg && socket.readyState === WebSocket.OPEN) {
-                    socket.send(msg);
+                    socket.send(JSON.stringify({
+                        "action": "Message",
+                        "message": msg
+                    }));
                     e.target.value = "";
                 }
             }
         });
 
-        connect();
+        setup();
     </script>
 </body>
+
 </html>

@@ -3,9 +3,11 @@ package rooms_models
 type StatusType string
 
 const (
-	StatusDefault StatusType = "offline" // just created
-	StatusActive  StatusType = "active"  // Host joined
-	StatusFull    StatusType = "full"    // Room is full
+	StatusDefault  StatusType = "created"  // just created
+	StatusActive   StatusType = "active"   // Host joined
+	StatusFull     StatusType = "full"     // Room is full
+	StatusWaiting  StatusType = "waiting"  // Room is starting a new game instance
+	StatusDeleting StatusType = "deleting" // Room is being deleted
 )
 
 type RoomConfig struct {
@@ -15,8 +17,8 @@ type RoomConfig struct {
 	Landscape  string `json:"landscape" default:"default"`
 }
 
-type RoomCreated struct {
-	RoomID    string     `json:"room_id"`
+type Room struct {
+	ID        string     `json:"room_id"`
 	JoinCode  string     `json:"join_code"`
 	HostID    string     `json:"host"`
 	Status    StatusType `json:"status" default:"offline"`

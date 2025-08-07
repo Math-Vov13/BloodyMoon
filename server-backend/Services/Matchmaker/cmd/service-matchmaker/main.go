@@ -36,6 +36,9 @@ func main() {
 	games_endpoint.POST("/create", endpoints.CreatePrivateGame)
 	games_endpoint.POST("/delete", endpoints.DeletePrivateGame)
 
+	rooms_endpoint := router.Group("/rooms", middlewares.VerifyUserMiddleware())
+	rooms_endpoint.POST("/connect", middlewares.VerifyRoomCodeMiddleware(), endpoints.ConnectToRoom)
+
 	// STATIC FILES
 	router.StaticFile("/home", "../../web/templates/index.html")
 	router.Static("/static", "../../web/static")

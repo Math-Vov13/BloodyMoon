@@ -3,16 +3,10 @@ package cache_rooms
 import (
 	"slices"
 
-	"github.com/Math-Vov13/BloodyMoon/models/rooms_models"
+	"github.com/Math-Vov13/BloodyMoon/models/cache/rooms_models"
 )
 
-func ChangeRoomStatus(roomdId string, status rooms_models.StatusType) bool {
-	room := GetRoomByID(roomdId)
-	room.Status = status
-	return true
-}
-
-func AddPlayerToRoom(playerId string, roomId string) bool {
+func AddPlayerToRoom(playerId string, roomId string) error {
 	// Get the game from Redis
 	// val, err := rdb.Get("game:" + roomId).Result()
 	// if err != nil {
@@ -25,9 +19,9 @@ func AddPlayerToRoom(playerId string, roomId string) bool {
 	// 	return false
 	// }
 
-	room := GetRoomByID(roomId)
-	if room == nil {
-		return false
+	room, err := GetRoomByID(roomId)
+	if err != nil {
+		return err
 	}
 
 	room.Players = append(room.Players, playerId)
@@ -35,10 +29,10 @@ func AddPlayerToRoom(playerId string, roomId string) bool {
 		room.Status = rooms_models.StatusFull
 	}
 
-	return true
+	return nil
 }
 
-func RemovePlayerFromRoom(playerId string, roomId string) bool {
+func RemovePlayerFromRoom(playerId string, roomId string) error {
 	// Get the game from Redis
 	// val, err := rdb.Get("game:" + roomId).Result()
 	// if err != nil {
@@ -51,9 +45,9 @@ func RemovePlayerFromRoom(playerId string, roomId string) bool {
 	// 	return false
 	// }
 
-	room := GetRoomByID(roomId)
-	if room == nil {
-		return false
+	room, err := GetRoomByID(roomId)
+	if err != nil {
+		return err
 	}
 
 	for i, player := range room.Players {
@@ -67,17 +61,26 @@ func RemovePlayerFromRoom(playerId string, roomId string) bool {
 		room.Status = rooms_models.StatusActive
 	}
 
-	return true
+	return nil
 }
 
-func ChangeRoomHost(roomId string, newOwnerId string) bool {
-	room := GetRoomByID(roomId)
-	if room == nil {
-		return false
+func ChangeRoomHost(roomId string, newOwnerId string) error {
+	room, err := GetRoomByID(roomId)
+	if err != nil {
+		return err
 	}
 
 	DeleteRoom(roomId) // Remove the old room from cache
 	room.HostID = newOwnerId
-	RegenerateRoom(room) // Create a new room with the updated owner
-	return true
+	regenerateRoom(room) // Create a new room with the updated owner
+	return nil
+}
+
+func GetRoomForHostID(hostID string) (*rooms_models.Room, error) {
+	for _, room := range fake_cache {
+		if room.HostID == hostID {
+			return room, nil
+		}
+	}
+	return nil, nil // No room found for the given host ID
 }

@@ -1,53 +1,55 @@
 package websocket_Room
 
 import (
+	"fmt"
+
 	"github.com/Math-Vov13/BloodyMoon/internal/database/cache_redis/cache_rooms"
-	"github.com/Math-Vov13/BloodyMoon/models/rooms_models"
-	"github.com/Math-Vov13/BloodyMoon/models/users_models"
+	"github.com/Math-Vov13/BloodyMoon/models/cache/rooms_models"
+	"github.com/Math-Vov13/BloodyMoon/models/cache/sessions_models"
 	"github.com/gin-gonic/gin"
 )
 
-func verifyAccesstoRoom(c *gin.Context, player *users_models.User) (room *rooms_models.RoomCreated, err string, code int) {
+func verifyAccesstoRoom(c *gin.Context, player *sessions_models.User) (room *rooms_models.Room, code int, err error) {
 	room_code := c.Query("code")
 	// 1. Check if the code is provided and valid
 	if len(room_code) != 6 {
-		err = "Invalid code"
+		err = fmt.Errorf("invalid code")
 		code = 400
 		return
 	}
 
 	// 2. Check if the room exists
-	room = cache_rooms.GetRoomWithCode(room_code)
-	if room == nil {
-		err = "Room not found"
+	room, err = cache_rooms.GetRoomByCode(room_code)
+	if err != nil {
 		code = 404
 		return
 	}
 
 	// 3. Check if the room is active
 	if (room.Status != rooms_models.StatusActive) && room.HostID != player.ID {
-		err = "Room is not active"
+		err = fmt.Errorf("Room is not active")
 		code = 409
 		return
 	}
 
 	// 4. Check if the room is full
 	if len(room.Players) >= room.RoomConfig.MaxPlayers {
-		err = "Room is full"
+		err = fmt.Errorf("Room is full")
 		code = 409
 		return
 	}
 
 	// 5. Check if the player is already in a room / game
-	// if mongodb.IsInGame(player.ID) {
-	// 	err = "You are already in a game"
-	// 	code = 409
-	// 	return
-	// }
+	if player.InstanceID != "" {
+		err = fmt.Errorf("you are already in a room")
+		code = 409
+		return
+	}
 
-	// if slices.Contains(room.Players, player.ID) {
-	// 	err = "You are already in the room"
-	// 	code = 409
+	// 6. Check if the player is banned from the room
+	// if room.IsBanned(player.ID) {
+	// 	err = fmt.Errorf("you are banned from this room")
+	// 	code = 403
 	// 	return
 	// }
 

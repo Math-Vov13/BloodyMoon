@@ -1,24 +1,23 @@
 package cache_rooms
 
 import (
-	"slices"
+	"fmt"
 	"time"
 
-	"github.com/Math-Vov13/BloodyMoon/models/rooms_models"
-	"github.com/Math-Vov13/BloodyMoon/models/users_models"
+	"github.com/Math-Vov13/BloodyMoon/models/cache/rooms_models"
 	"github.com/Math-Vov13/BloodyMoon/pkg/generator"
 )
 
-func CreateRoom(host *users_models.User, configs *rooms_models.RoomConfig) *rooms_models.RoomCreated {
+func CreateRoom(User_id string, configs *rooms_models.RoomConfig) (*rooms_models.Room, error) {
 	// Check if the user is not already in a room
-	if _, exists := fake_cache[host.ID]; exists {
-		return nil
+	if _, exists := fake_cache[User_id]; exists {
+		return nil, fmt.Errorf("user already in a room")
 	}
 
 	// Generate a unique ID for the room
 	id_generated := generator.GenerateID(32)
 	for {
-		if GetRoomByID(id_generated) == nil {
+		if _, err := GetRoomByID(id_generated); err != nil {
 			break
 		}
 		id_generated = generator.GenerateID(32)
@@ -26,19 +25,19 @@ func CreateRoom(host *users_models.User, configs *rooms_models.RoomConfig) *room
 	// Generate a unique code for the room
 	code_generated := generator.GenerateID(6)
 	for {
-		if GetRoomWithCode(code_generated) == nil {
+		if _, err := GetRoomByCode(code_generated); err != nil {
 			break
 		}
 		code_generated = generator.GenerateID(6)
 	}
 
 	// Create a new game
-	room := &rooms_models.RoomCreated{
-		RoomID:    id_generated,
+	room := &rooms_models.Room{
+		ID:        id_generated,
 		JoinCode:  code_generated,
-		HostID:    host.ID,
+		HostID:    User_id,
 		Status:    rooms_models.StatusDefault,
-		Players:   []string{host.ID},
+		Players:   []string{User_id},
 		CreatedAt: time.Now().Unix(),
 		RoomConfig: rooms_models.RoomConfig{
 			RoomName:   "room_name",
@@ -53,84 +52,36 @@ func CreateRoom(host *users_models.User, configs *rooms_models.RoomConfig) *room
 	// 	return nil
 	// }
 
-	fake_cache[host.ID] = room
-	return room
+	fake_cache[User_id] = room
+	return room, nil
 }
 
-func RegenerateRoom(room *rooms_models.RoomCreated) *rooms_models.RoomCreated {
-	fake_cache[room.HostID] = room
-	return room
+func ChangeRoomStatus(roomId string, status rooms_models.StatusType) error {
+	room, err := GetRoomByID(roomId)
+	if err != nil {
+		return err
+	}
+	room.Status = status
+	return nil
 }
 
-func JoinRoom(hostId string, roomId string) bool {
-	// Get the game from Redis
-	// val, err := rdb.Get("game:" + roomId).Result()
-	// if err != nil {
-	// 	return false
-	// }
-
-	// var room rooms_models.RoomCreated
-	// err = json.Unmarshal([]byte(val), &room)
-	// if err != nil {
-	// 	return false
-	// }
-
-	room := GetRoomByID(roomId)
-	if room == nil {
-		return false
-	}
-
-	if room.Status != rooms_models.StatusActive {
-		return false
-	}
-
-	room.Players = append(room.Players, hostId)
-	if len(room.Players) > room.RoomConfig.MaxPlayers {
-		room.Status = rooms_models.StatusFull
-	}
-
-	return true
-}
-
-func LeaveRoom(hostId string, roomId string) bool {
-	// Get the game from Redis
-	// val, err := rdb.Get("game:" + roomId).Result()
-	// if err != nil {
-	// 	return false
-	// }
-
-	// var room rooms_models.RoomCreated
-	// err = json.Unmarshal([]byte(val), &room)
-	// if err != nil {
-	// 	return false
-	// }
-
-	for _, room := range fake_cache {
-		if room.RoomID == roomId {
-			for i, player := range room.Players {
-				if player == hostId {
-					room.Players = slices.Delete(room.Players, i, i+1)
-					return true
-				}
-			}
-		}
-	}
-
-	return false
-}
-
-func DeleteRoom(roomID string) bool {
+func DeleteRoom(roomID string) error {
 	// Delete the game from Redis
 	// err := rdb.Del("game:"+host.ID).Err()
 	// if err != nil {
 	// 	return
 	// }
 
-	room := GetRoomByID(roomID)
-	if room == nil {
-		return false
+	room, err := GetRoomByID(roomID)
+	if err != nil {
+		return err
 	}
 
 	delete(fake_cache, room.HostID)
-	return true
+	return nil
+}
+
+func regenerateRoom(room *rooms_models.Room) (*rooms_models.Room, error) {
+	fake_cache[room.HostID] = room
+	return room, nil
 }

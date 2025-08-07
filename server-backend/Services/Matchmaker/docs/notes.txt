@@ -26,3 +26,20 @@ infos de la partie (rejoint):
 2. ping
 3. mode de jeu
 4. joueurs connectés
+
+
+Générer des ID custom pour chaque joueur dans la room
+
+-----
+Infos du Joueurs sont save sur MariaDB
+Rooms sont save en Cache sur Redis
+Games sont save en Cache sur Redis
+
+Un joueur rejoint une room => sa session Redis save l'ID de la room
+
+{
+    "instance_id": "1234",
+    "username": "anonyme01",
+    "premium": false,
+    ...
+}

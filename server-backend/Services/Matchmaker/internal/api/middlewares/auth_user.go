@@ -4,8 +4,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/Math-Vov13/BloodyMoon/internal/database/mongodb"
-	"github.com/Math-Vov13/BloodyMoon/models/users_models"
+	"github.com/Math-Vov13/BloodyMoon/internal/database/cache_redis/cache_sessions"
 	"github.com/gin-gonic/gin"
 )
 
@@ -22,8 +21,8 @@ func VerifyUserMiddleware() gin.HandlerFunc {
 				return
 			}
 
-			user_db := mongodb.GetUserByName(username)
-			if user_db == nil {
+			user_db, err := cache_sessions.GetUserByName(username)
+			if err != nil {
 				ctx.JSON(http.StatusBadRequest, gin.H{
 					"env":     "development",
 					"message": "You must provide a valid username! (key: testName)",
@@ -32,10 +31,7 @@ func VerifyUserMiddleware() gin.HandlerFunc {
 				return
 			}
 
-			ctx.Set("user", &users_models.User{
-				ID:       user_db.ID,
-				Username: user_db.Username,
-			})
+			ctx.Set("user", user_db)
 			ctx.Next()
 		}
 	}

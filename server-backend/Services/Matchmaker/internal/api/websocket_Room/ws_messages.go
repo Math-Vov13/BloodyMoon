@@ -3,9 +3,11 @@ package websocket_Room
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
-	"github.com/Math-Vov13/BloodyMoon/models/requests_models"
-	"github.com/Math-Vov13/BloodyMoon/models/responses_models"
+	"github.com/Math-Vov13/BloodyMoon/models/ws/requests_models"
+	"github.com/Math-Vov13/BloodyMoon/models/ws/responses_models"
+	"github.com/google/uuid"
 )
 
 func prepareMessage(message any) (msg []byte) {
@@ -14,7 +16,7 @@ func prepareMessage(message any) (msg []byte) {
 	if err != nil {
 		msg, _ = json.Marshal(responses_models.ResponseForError{
 			BaseResponse: responses_models.BaseResponse{
-				Code:    500,
+				EventId: uuid.NewString(),
 				Type:    responses_models.TypeError,
 				Message: "Error when sending message",
 			},
@@ -46,6 +48,12 @@ func decodeMessage(p []byte) (msg *requests_models.RequestEvent, code int, err e
 	if err1 := validate.Struct(msg); err1 != nil {
 		code = 422 // Unprocessable Entity
 		err = fmt.Errorf("validation error: %w", err1)
+		return
+	}
+
+	if len(strings.TrimSpace(msg.Message)) <= 1 {
+		code = 400 // Bad Request
+		err = fmt.Errorf("empty message received")
 		return
 	}
 

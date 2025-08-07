@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"github.com/Math-Vov13/BloodyMoon/internal/database/cache_redis/cache_rooms"
-	"github.com/Math-Vov13/BloodyMoon/internal/database/mongodb"
-	"github.com/Math-Vov13/BloodyMoon/models/requests_models"
-	"github.com/Math-Vov13/BloodyMoon/models/responses_models"
-	"github.com/Math-Vov13/BloodyMoon/models/rooms_models"
-	"github.com/Math-Vov13/BloodyMoon/models/users_models"
+	"github.com/Math-Vov13/BloodyMoon/internal/database/cache_redis/cache_sessions"
+	"github.com/Math-Vov13/BloodyMoon/models/cache/rooms_models"
+	"github.com/Math-Vov13/BloodyMoon/models/cache/sessions_models"
+	"github.com/Math-Vov13/BloodyMoon/models/ws/requests_models"
+	"github.com/Math-Vov13/BloodyMoon/models/ws/responses_models"
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 	"github.com/gorilla/websocket"
@@ -48,18 +48,18 @@ const (
 )
 
 func HandleWebSocket(c *gin.Context) {
-	user := c.MustGet("user").(*users_models.User)
+	user := c.MustGet("user").(*sessions_models.User)
 	excited := true
 
 	// --- Verify Room and Player Access ---
-	room_target, err1, errcode := verifyAccesstoRoom(c, user)
-	if err1 != "" {
+	room_target, errcode, err := verifyAccesstoRoom(c, user)
+	if err != nil {
 		c.Writer.Header().Set("Retry-After", "30")         // 30 seconds
 		c.Writer.Header().Set("Cache-Control", "no-cache") // no cache
 		c.Writer.Header().Set("Connection", "close")       // close connection
 		c.JSON(errcode, gin.H{
 			"success": false,
-			"message": "Error connecting to the room: " + err1,
+			"message": "Error connecting to the room: " + err.Error(),
 			"code":    errcode,
 			"type":    "error",
 		})
@@ -101,10 +101,10 @@ func HandleWebSocket(c *gin.Context) {
 
 	// --- Add the player to the room ---
 	// Get the room
-	actual_room := game_rooms[room_target.RoomID]
+	actual_room := game_rooms[room_target.ID]
 	if actual_room == nil {
-		fmt.Println("Room not found, creating a new one")
-		actual_room = CreateRoom(room_target.RoomID, room_target.HostID) // Create the room if it doesn't exist
+		fmt.Println("Room not found, creating a new one on WebSocket server")
+		actual_room = CreateRoom(room_target.ID, room_target.HostID) // Create the room if it doesn't exist
 	}
 
 	// Check if the player is already in the room
@@ -122,10 +122,10 @@ func HandleWebSocket(c *gin.Context) {
 	}()
 
 	// Change the user's status to "in room"
-	if succ := mongodb.ChangeUserStatus(user.ID, users_models.StatusInRoom, actual_room.ID); !succ {
+	if err := cache_sessions.ChangeUserStatus(user.ID, actual_room.ID, sessions_models.StatusInRoom); err != nil {
 		conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(
 			websocket.CloseInternalServerErr,
-			"Internal error",
+			"Internal error: "+err.Error(),
 		))
 		return
 	}
@@ -142,7 +142,7 @@ func HandleWebSocket(c *gin.Context) {
 	defer func() {
 		if excited {
 			actual_room.RemoveClient(client) // Remove the client from the room
-			mongodb.ChangeUserStatus(user.ID, users_models.StatusOffline, "")
+			cache_sessions.ChangeUserStatus(user.ID, "", sessions_models.StatusOnline)
 		}
 	}()
 
@@ -224,7 +224,7 @@ func HandleWebSocket(c *gin.Context) {
 							cache_rooms.ChangeRoomHost(actual_room.ID, newHost.ID)
 							actual_room.BroadcastMessage(prepareMessage(responses_models.ResponseForSystem{
 								BaseResponse: responses_models.BaseResponse{
-									Code:    200,
+									EventId: actual_room.GenerateUUID(),
 									Type:    responses_models.TypeSystem,
 									Message: fmt.Sprintf("New Host '%s' choosed for the room", newHost.Username),
 								},
@@ -244,7 +244,7 @@ func HandleWebSocket(c *gin.Context) {
 			actual_room.RemoveClient(client) // Remove the client from the room
 			mutex.Unlock()
 			cache_rooms.RemovePlayerFromRoom(user.ID, actual_room.ID)
-			mongodb.ChangeUserStatus(user.ID, users_models.StatusOffline, "")
+			cache_sessions.ChangeUserStatus(user.ID, "", sessions_models.StatusOnline)
 
 			mutex.Lock()
 			delete(conn_clients, client) // Remove the client from the map
@@ -252,12 +252,12 @@ func HandleWebSocket(c *gin.Context) {
 
 			actual_room.BroadcastMessage(prepareMessage(responses_models.ResponseForSystem{
 				BaseResponse: responses_models.BaseResponse{
-					Code:    200,
+					EventId: actual_room.GenerateUUID(),
 					Type:    responses_models.TypeSystem,
 					Message: fmt.Sprintf("User '%s' left the room", user.Username),
 				},
 				Content: gin.H{
-					"status":   "left",
+					"status":   "player_left",
 					"user_id":  user.ID,
 					"username": user.Username,
 				},
@@ -283,35 +283,62 @@ func HandleWebSocket(c *gin.Context) {
 
 			switch mt {
 			case websocket.TextMessage:
-				reqMessage, code, err := decodeMessage(msg)
+				reqMessage, _, err := decodeMessage(msg)
 				if err != nil {
 					log.Println("Message decode error:", err)
-					client.send <- prepareMessage(gin.H{
-						"success": false,
-						"message": "Error in Message validation",
-						"code":    code,
-						"error":   err.Error(),
-						"type":    "error",
+					client.send <- prepareMessage(responses_models.ResponseForError{
+						BaseResponse: responses_models.BaseResponse{
+							EventId: actual_room.GenerateUUID(),
+							Type:    responses_models.TypeError,
+							Message: "Error in Message validation",
+						},
+						Error: err.Error(),
 					})
+
+					// 	gin.H{
+					// 	"success": false,
+					// 	"message": "Error in Message validation",
+					// 	"code":    code,
+					// 	"error":   err.Error(),
+					// 	"type":    "error",
+					// })
 					continue
 				}
 
 				if reqMessage.Action == requests_models.TypeConfig {
 					if !(user.ID == actual_room.hostID) {
-						client.send <- prepareMessage(gin.H{
-							"success": false,
-							"message": "You are not the host of the room",
-							"code":    403,
-							"error":   "Host only",
-							"type":    "error",
+						client.send <- prepareMessage(responses_models.ResponseForError{
+							BaseResponse: responses_models.BaseResponse{
+								EventId: actual_room.GenerateUUID(),
+								Type:    responses_models.TypeError,
+								Message: "You are not the host of the room",
+							},
+							Error: "You have not the permission to do that action !",
 						})
+
+						// 	gin.H{
+						// 	"success": false,
+						// 	"message": "You are not the host of the room",
+						// 	"code":    403,
+						// 	"error":   "Host only",
+						// 	"type":    "error",
+						// })
 						continue
 					}
 					// TODO : Change the game configuration
 				}
 
 				fmt.Printf("Message received from %s: '%v'\n", conn.RemoteAddr(), reqMessage.Message)
-				actual_room.BroadcastMessage(prepareMessage(reqMessage), nil)
+				//actual_room.BroadcastMessage(prepareMessage(reqMessage), nil)
+				actual_room.BroadcastMessage(prepareMessage(responses_models.ResponseForMessage{
+					BaseResponse: responses_models.BaseResponse{
+						EventId: actual_room.GenerateUUID(),
+						Type:    responses_models.TypeMessage,
+						Message: "New Message received",
+					},
+					Content: reqMessage.Message,
+					Author:  user.Username,
+				}), nil)
 
 			default:
 				log.Printf("Received non-text message type: %d\n", mt)
@@ -325,24 +352,39 @@ func HandleWebSocket(c *gin.Context) {
 	}()
 
 	// Say Welcome to the client !
+	join_message_id := actual_room.GenerateUUID()
 	// --> client
-	client.send <- prepareMessage(gin.H{
-		"success": true,
-		"message": "You are now connected to the room!",
-		"room":    actual_room,
-		"owner":   is_host,
-		"type":    "info",
+	client.send <- prepareMessage(responses_models.ResponseForAck{
+		BaseResponse: responses_models.BaseResponse{
+			EventId: join_message_id,
+			Type:    responses_models.TypeAck,
+			Message: "You are now connected to the room!",
+		},
+		AckId: "1234",
+		Content: gin.H{
+			"status": "connected",
+			"owner":  is_host,
+		},
 	}) // Send the message to the client
+
+	// 	gin.H{
+	// 	"success": true,
+	// 	"message": "You are now connected to the room!",
+	// 	"room":    actual_room,
+	// 	"owner":   is_host,
+	// 	"type":    "info",
+	// })
 
 	// --> all clients in the room
 	actual_room.BroadcastMessage(prepareMessage(responses_models.ResponseForSystem{
 		BaseResponse: responses_models.BaseResponse{
-			Code:    200,
+			EventId: join_message_id,
 			Type:    responses_models.TypeSystem,
 			Message: fmt.Sprintf("User '%s' has joined the room", user.Username),
 		},
+		Destinator: responses_models.DestinatorAll,
 		Content: gin.H{
-			"status":   "joined",
+			"status":   "player_joined",
 			"user_id":  user.ID,
 			"username": user.Username,
 		},

@@ -4,14 +4,15 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Math-Vov13/BloodyMoon/models/users_models"
+	"github.com/Math-Vov13/BloodyMoon/models/cache/sessions_models"
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
 type Client struct {
 	conn     *websocket.Conn
 	send     chan []byte
-	user     *users_models.User
+	user     *sessions_models.User
 	lastPing int64 // Timestamp of the last ping
 }
 
@@ -20,6 +21,7 @@ type Room struct {
 	clients   map[string]*Client
 	broadcast chan []byte
 	hostID    string
+	uuid      uuid.UUID
 }
 
 // --- Rooms ---
@@ -29,13 +31,14 @@ func CreateRoom(roomId string, hostId string) (room *Room) {
 		clients:   make(map[string]*Client),
 		broadcast: make(chan []byte),
 		hostID:    hostId,
+		uuid:      uuid.NewSHA1(uuid.NameSpaceURL, []byte(roomId)),
 	}
 	game_rooms[roomId] = room
 
 	return
 }
 
-func (r *Room) ChangeRoomHost() (newHost *users_models.User, err error) {
+func (r *Room) ChangeRoomHost() (newHost *sessions_models.User, err error) {
 	if r == nil {
 		fmt.Println("Tried to change host of nil Room")
 		err = fmt.Errorf("nil Room")
@@ -78,7 +81,7 @@ func (r *Room) RemoveRoom() (err error) {
 }
 
 // --- Clients ---
-func (r *Room) CreateClient(conn *websocket.Conn, player *users_models.User) (client *Client) {
+func (r *Room) CreateClient(conn *websocket.Conn, player *sessions_models.User) (client *Client) {
 	// Create a new client
 	client = &Client{
 		conn:     conn,                  // WebSocket connection
@@ -112,6 +115,10 @@ func (r *Room) RemoveClient(client *Client) (err error) {
 }
 
 // --- Messages ---
+func (r *Room) GenerateUUID() string {
+	return uuid.NewSHA1(r.uuid, fmt.Appendf(nil, "%d", time.Now().UnixNano())).String()
+}
+
 func (r *Room) BroadcastMessage(message []byte, excludeIds map[string]bool) {
 	for id, client := range r.clients {
 		if excludeIds != nil && excludeIds[id] {
@@ -127,7 +134,24 @@ func (r *Room) BroadcastMessage(message []byte, excludeIds map[string]bool) {
 	}
 }
 
-func (r *Room) MutlicastMessage(message []byte, clients map[*Client]bool) {
+// func (r *Room) SpecialMessage(main_message []byte, special_demands map[*Client][]byte) {
+// 	for client, message := range special_demands {
+// 		select {
+// 		case client.send <- message:
+// 		default:
+// 			mutex.Lock()
+// 			client.conn.Close()
+// 			mutex.Unlock()
+// 		}
+// 	}
+// 	if len(special_demands) == 0 {
+// 		// If no special demands, send the main message to all clients
+// 		r.BroadcastMessage(main_message, nil)
+// 		return
+// 	}
+// }
+
+func (r *Room) MulticastMessage(message []byte, clients map[*Client]bool) {
 	for client := range clients {
 		select {
 		case <-client.send:

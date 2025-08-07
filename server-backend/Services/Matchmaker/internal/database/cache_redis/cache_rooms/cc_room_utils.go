@@ -1,18 +1,21 @@
 package cache_rooms
 
-import "github.com/Math-Vov13/BloodyMoon/models/rooms_models"
+import (
+	"fmt"
 
-func GetRoomByID(room_id string) *rooms_models.RoomCreated {
+	"github.com/Math-Vov13/BloodyMoon/models/cache/rooms_models"
+)
+
+func GetRoomByID(room_id string) (*rooms_models.Room, error) {
 	for _, room := range fake_cache {
-		if room.RoomID == room_id {
-			return room
+		if room.ID == room_id {
+			return room, nil
 		}
 	}
-
-	return nil
+	return nil, fmt.Errorf("room not found")
 }
 
-func GetRoomWithCode(code string) *rooms_models.RoomCreated {
+func GetRoomByCode(code string) (*rooms_models.Room, error) {
 	// Get the game from Redis
 	// val, err := rdb.Get("game:" + code).Result()
 	// if err != nil {
@@ -27,9 +30,9 @@ func GetRoomWithCode(code string) *rooms_models.RoomCreated {
 
 	for _, room := range fake_cache {
 		if room.JoinCode == code {
-			return room
+			return room, nil
 		}
 	}
 
-	return nil
+	return nil, fmt.Errorf("room not found")
 }
